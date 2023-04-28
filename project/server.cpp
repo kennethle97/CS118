@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cstring>
 #include <cstdio>
+#include <ctype.h>
 #include <stdlib.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -11,12 +12,49 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <netinet/in.h>
+#include <dirent.h>
 
 
 #define MY_PORT 8080
 #define BACKLOG 10 /*Pending connections queue size*/
 #define BUFFER_SIZE 1024
+#define MAX_PATH_LENGTH 1024
 
+char* find_case_insensitive_filename(const char* filename ,const char* dir_path){
+    DIR *directory;
+    struct dirent *dir;
+    int filename_length = strlen(filename);
+    char lower_filename[filename_length + 1];
+    //Convert filename to lowercase for parsing through directory later.
+    for(int i = 0; i < filename_length;i++){
+        lower_filename[i] = tolower(filename[i]);
+    } 
+
+    if((directory = opendir(dir_path)) != NULL){
+        while((dir = readdir(directory)) != NULL){
+            //checking to see if it's a normal file
+            if(dir -> d_type == DT_REG){
+                char *temp_filename = dir -> d_name;
+                int temp_length = strlen(temp_filename);
+                char lower_temp_filename[temp_length+1];
+                for(int i = 0; i < temp_length; i++){
+                    lower_temp_filename[i] = tolower(temp_filename[i]);
+                } 
+                bool file_match = (strcmp(lower_temp_filename, lower_filename));
+                if(file_match == 0){
+                    char* filename_match = (char*)malloc(strlen(temp_filename)+1);
+                    strcpy(filename_match, temp_filename);
+                    return filename_match;
+                }
+            }
+        }
+    }
+    else{
+        printf("Directory path not found on system:%s\n",dir_path);
+    }
+    return NULL;
+
+}
 
 
 const char *mime_type(char* filename){
@@ -45,6 +83,13 @@ int main(int argc, char*argv[])
     socklen_t client_addr_size = sizeof(client_addr);
     char buffer[BUFFER_SIZE];
     int port_number = MY_PORT;
+
+
+    char directory_path[MAX_PATH_LENGTH];
+    if(getcwd(directory_path,MAX_PATH_LENGTH) == NULL){
+        perror("Error in getting current working directory");
+        exit(1);
+    }
 
     if((sock_fd = socket(PF_INET, SOCK_STREAM, 0)) == -1){
         perror("socket");
@@ -103,9 +148,11 @@ int main(int argc, char*argv[])
         printf("Request Received:\n%s\n",buffer);
 
         //Parse HTTP request for filename
-        char filename[256] = {0};
+        char* filename = new char[256];
+        memset(filename,0,256);
         sscanf(buffer, "GET /%s HTTP/1.1",filename);
 
+        filename = find_case_insensitive_filename(filename,directory_path);
 
         //Now to open file and read read contents into buffer
         struct stat file_stat;
@@ -125,7 +172,7 @@ int main(int argc, char*argv[])
             read(fd, file_content, file_size);
             const char* mime_typestr = mime_type(filename);
             char response[BUFFER_SIZE] = {0};
-            sprintf(response, "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %ld\r\n\r\n", mime_typestr, file_size);
+            sprintf(response, "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n", mime_typestr, file_size);
             send(client_fd, response, strlen(response), 0);
             send(client_fd, file_content, file_size, 0);
             
@@ -135,5 +182,5 @@ int main(int argc, char*argv[])
         close(fd);
         }
     close(client_fd);
-    // free(file_content)
+    close(sock_fd);
 }
