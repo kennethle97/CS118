@@ -1,15 +1,15 @@
-CC=gcc
-CFLAGS=-I.
+CC=g++
+CCFLAGS=-I. -std=c++20
 DEPS=
 OBJ=server.o
-USERID=123456789
+USERID=804953883
 
 %.o: %.c $(DEPS)
-	$(CC) -c -o $@ $< $(CFLAGS)
+	$(CC) -c -o $@ $< $(CCFLAGS)
 
 all: server
 server: $(OBJ)
-	$(CC) -o $@ $^ $(CFLAGS)
+	$(CC) -o $@ $^ $(CCFLAGS)
 
 clean:
 	rm -rf *.o server *.tar.gz
