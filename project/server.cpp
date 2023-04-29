@@ -97,8 +97,8 @@ const char *mime_type(char* filename){
     else if(strstr(filename, ".html") || strstr(filename, ".htm")){
         mime_type = "text/html";
     }
-    else if (strstr(filename,".jpg") || strstr (filename,"jpeg")){
-        mime_type = "image/jpg";
+    else if (strstr(filename,".jpg") || strstr (filename,".jpeg")){
+        mime_type = "image/jpeg";
     }
     else if (strstr(filename,".png")){
         mime_type = "image/png";
