@@ -56,6 +56,31 @@ char* find_case_insensitive_filename(const char* filename ,const char* dir_path)
 
 }
 
+char* decode_filename(const char* filename){
+
+    int filename_length = strlen(filename);
+    char* filename_decoded = (char*)malloc(filename_length+1);
+    int j = 0;
+    for(int i = 0; filename[i] != '\0';i++){
+        if(filename[i] == '%'){
+            if(filename[i+1] == '2' && filename [i+2] == '0'){
+                filename_decoded[j] = ' ';
+                i+=2;
+            }
+            else{
+            filename_decoded[j]=(char)strtol(&filename[i+1],NULL, 16);
+            i+=2;
+            }
+        }
+        else{
+            filename_decoded[j] = filename[i];
+        }
+        j++;
+    }
+
+    return filename_decoded;
+
+}
 
 const char *mime_type(char* filename){
     const char *mime_type = "application/octet-stream";
@@ -75,6 +100,7 @@ const char *mime_type(char* filename){
 }
 
 
+
 int main(int argc, char*argv[])
 {
     int sock_fd , client_fd; /*socket file descriptors for server and client*/
@@ -84,7 +110,7 @@ int main(int argc, char*argv[])
     char buffer[BUFFER_SIZE];
     int port_number = MY_PORT;
 
-
+    /*Set current working directory to wherever the executable is run from including the files.*/
     char directory_path[MAX_PATH_LENGTH];
     if(getcwd(directory_path,MAX_PATH_LENGTH) == NULL){
         perror("Error in getting current working directory");
@@ -148,12 +174,20 @@ int main(int argc, char*argv[])
         printf("Request Received:\n%s\n",buffer);
 
         //Parse HTTP request for filename
-        char* filename = new char[256];
-        memset(filename,0,256);
-        sscanf(buffer, "GET /%s HTTP/1.1",filename);
-
-        filename = find_case_insensitive_filename(filename,directory_path);
-
+        char* filename_buffer = new char[256];
+        memset(filename_buffer,0,256);
+        sscanf(buffer, "GET /%256[^? ]? HTTP/1.1",filename_buffer);
+        printf("Filename_Buffer:%s\n",filename_buffer);
+        char* filename;
+        if(find_case_insensitive_filename(filename_buffer,directory_path)!= NULL){
+            filename = find_case_insensitive_filename(filename_buffer,directory_path);
+        }
+        else{
+            char *decoded_filename = decode_filename(filename_buffer);
+            printf("Decoded_Filename:%s\n",decoded_filename);
+            filename = find_case_insensitive_filename(decoded_filename,directory_path);
+            printf("Filename:%s\n",filename);
+        }
         //Now to open file and read read contents into buffer
         struct stat file_stat;
         char* file_content;
