@@ -29,17 +29,20 @@ char* find_case_insensitive_filename(const char* filename ,const char* dir_path)
     for(int i = 0; i < filename_length;i++){
         lower_filename[i] = tolower(filename[i]);
     } 
-
+    /*Navigate through the directory given by dir_path to look for the file*/
     if((directory = opendir(dir_path)) != NULL){
         while((dir = readdir(directory)) != NULL){
-            //checking to see if it's a normal file
+            //checking to see if it's a normal file with DT_REG flag
             if(dir -> d_type == DT_REG){
+                //Initialize temporary pointer to character array holding filename we are iterating over.
                 char *temp_filename = dir -> d_name;
                 int temp_length = strlen(temp_filename);
                 char lower_temp_filename[temp_length+1];
+                //Change the filename to lowercase
                 for(int i = 0; i < temp_length; i++){
                     lower_temp_filename[i] = tolower(temp_filename[i]);
-                } 
+                }
+                //check and see if we get a match and if so return a copy of the string to a buffer. 
                 bool file_match = (strcmp(lower_temp_filename, lower_filename));
                 if(file_match == 0){
                     char* filename_match = (char*)malloc(strlen(temp_filename)+1);
@@ -50,6 +53,7 @@ char* find_case_insensitive_filename(const char* filename ,const char* dir_path)
         }
     }
     else{
+        //Shouldn't usually return anything as the directory is already configured in main was used for debugging.
         printf("Directory path not found on system:%s\n",dir_path);
     }
     return NULL;
@@ -57,10 +61,12 @@ char* find_case_insensitive_filename(const char* filename ,const char* dir_path)
 }
 
 char* decode_filename(const char* filename){
-
+    /*Primary goal of this function is to be able to read character spaces in file names and return it*/
     int filename_length = strlen(filename);
     char* filename_decoded = (char*)malloc(filename_length+1);
     int j = 0;
+
+    /*Parse through the filename to look for %20 symbol representing a space and returning the string with a space*/
     for(int i = 0; filename[i] != '\0';i++){
         if(filename[i] == '%'){
             if(filename[i+1] == '2' && filename [i+2] == '0'){
@@ -81,8 +87,9 @@ char* decode_filename(const char* filename){
     return filename_decoded;
 
 }
-
+/*mime_type returns the mime type of the filename passed into it*/
 const char *mime_type(char* filename){
+    /*By default mime_type is set to application/octet-stream as a generic file type*/
     const char *mime_type = "application/octet-stream";
     if (strstr(filename,".txt")){
         mime_type = "text/plain";
@@ -179,6 +186,8 @@ int main(int argc, char*argv[])
         sscanf(buffer, "GET /%256[^? ]? HTTP/1.1",filename_buffer);
         printf("Filename_Buffer:%s\n",filename_buffer);
         char* filename;
+        /*First we pass the filename from the request and pass it directly into find_case_insensitive_filename to see if we get a match.
+         If we don't then we pass it into the decoder and then run it through case_insensitive test to see if we get a match again.*/
         if(find_case_insensitive_filename(filename_buffer,directory_path)!= NULL){
             filename = find_case_insensitive_filename(filename_buffer,directory_path);
         }
@@ -194,11 +203,13 @@ int main(int argc, char*argv[])
         int file_size;
 
         int fd = open(filename,O_RDONLY);
+        /*Return 404 Response if filename doesn't exist */
         if (fd == -1){
             char response[] = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
             send(client_fd,response,strlen(response),0);
             }
         else{
+            /*First we send a response header with mime_type and file_size and then send the contents of the file afer.*/
             fstat(fd, &file_stat);
             file_size = file_stat.st_size;
             file_content = (char*)malloc(file_size+1);
@@ -212,9 +223,10 @@ int main(int argc, char*argv[])
             
             free(file_content);
         }
-
+        /*close the file descriptor after finishing sending the data*/
         close(fd);
         }
+        /*Close the remaining sockets and the server.*/
     close(client_fd);
     close(sock_fd);
 }
