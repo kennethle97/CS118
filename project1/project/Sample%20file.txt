@@ -1,0 +1,1 @@
+Sample file to test filename with % symbol inside.
