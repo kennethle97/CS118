@@ -35,7 +35,7 @@ class Server {
     
     Server(std::string config);
     struct IPv4_Header;
-    struct TCP_Header;
+    struct TCP_Packet;
    
 
     private:
@@ -46,8 +46,11 @@ class Server {
     bool check_excluded_ip_address(uint32_t source_ip,uint32_t dest_ip,uint16_t source_port,uint16_t dest_port);
     
     IPv4_Header parse_IPv4_Header(const char* packet);
-    TCP_Header parse_TCP_Header(uint8_t IPv4_header_length, const char* packet);
+    TCP_Packet parse_TCP_Packet(IPv4_Header ip_header, const char* packet);
+    bool valid_checksum(IPv4_Header ip_header, TCP_Packet tcp_packet);
+    uint32_t calculate_checksum(const void* data, size_t length);
     void printIPv4Header(const IPv4_Header& header);
+    void printTCPHeader(const TCP_Packet& tcp_packet);
     // void map_ip_port(std::string ip_address,port_pair pair_port );
     // void add_exclusion_range(ip_address_pair pair_ip,exclusion_range port_ranges);
     // void match_expression(std::string line);
