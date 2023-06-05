@@ -2,7 +2,7 @@
 
 #define BUFFER_SIZE 1024
 #define MAX_CONNECTIONS 20
-#define DEFAULT_PORT 8080
+#define DEFAULT_PORT 5152
 
 
 struct Server::IPv4_Header {
@@ -35,7 +35,7 @@ struct Server::TCP_Packet {
 
 Server::Server(std::string config) {
     parse_config(config);
-    const char* packet = "\x45\x00\x00\x2a\x1e\x84\x40\x00\x40\x06\xae\x87\xc0\xa8\x01\x02\xac\x10\x00\x0a\x04\xd2\x00\x50\x00\x00\x00\x00\x50\x00\x00\x00\x00\x00\x00\x00\x3c\xfe\x00\x00\x00\x00\x00\x00";
+    const char* packet = "\x47\x00\x00\x35\x1e\x84\x40\x00\x40\x06\xcb\x49\xc0\xa8\x01\x02\xac\x10\x00\x0a\x10\x00\x00\x50\x60\x70\x70\x70\x04\xd2\x00\x50\x00\x00\x00\x00\x50\x00\x00\x00\x00\x00\x00\x00\xac\x58\x00\x00\x10\x50\x20\x50\x60";
     IPv4_Header parsed_header = parse_IPv4_Header(packet);
     TCP_Packet parsed_tcp_packet = parse_TCP_Packet(parsed_header,packet);
     printIPv4Header(parsed_header);
@@ -61,9 +61,10 @@ Server::IPv4_Header Server::parse_IPv4_Header(const char* packet) {
     header.destination_ip = (buffer[16] << 24) | (buffer[17] << 16) | (buffer[18] << 8) | buffer[19];
     //Need the options field as well to calculate the checksum for the IP packet.
     uint16_t header_length = (header.version_hlength_tos & 0x0F00) >> 8; 
-    uint16_t options_length = (header_length - 5) * 4 ;
+    size_t options_length = (header_length - 5) * 4 ;
     const uint8_t* options_buffer = buffer + 20;
     if(options_length){
+        header.options = new uint8_t[options_length];
         memcpy(header.options,options_buffer,options_length);
         }
     else{
@@ -100,8 +101,11 @@ Server::TCP_Packet Server::parse_TCP_Packet(IPv4_Header ip_header, const char* p
     // int data_offset = (tcp_packet_buffer[12] & 0xF0 >> 4);
     uint16_t tcp_packet_length = ipv4_total_length - (ipv4_header_length * 4);
     const uint8_t* options_and_data_buffer = tcp_packet_buffer + 20;
-    if(tcp_packet_length - 20 > 0){
-        memcpy(tcp_packet.options_and_data, options_and_data_buffer, tcp_packet_length - 20);
+    size_t options_and_data_length = tcp_packet_length - 20;
+
+    if(options_and_data_length){
+        tcp_packet.options_and_data = new uint8_t[options_and_data_length];
+        memcpy(tcp_packet.options_and_data, options_and_data_buffer, options_and_data_length);
     }
     else{
         tcp_packet.options_and_data = nullptr;
@@ -123,24 +127,22 @@ bool Server::valid_checksum(IPv4_Header ip_header, TCP_Packet tcp_packet){
 
     // Copy the TCP/UDP length (16 bits) into the pseudo header
     uint8_t header_length = (ip_header.version_hlength_tos & 0x0F00) >> 8;
-    uint16_t tcp_length = static_cast<uint16_t>(ip_header.total_length - header_length * 4);
+    uint16_t ip_total_length = ip_header.total_length;
+    uint16_t tcp_length = static_cast<uint16_t>(ip_total_length - header_length * 4);
     memcpy(pseudo_header + 10, &tcp_length, sizeof(uint16_t));
 
     TCP_Packet tcp_copy = tcp_packet;
-    //Set the value of the checksum to be 0 for the tcp copy of the packet.
     tcp_copy.checksum = 0;
 
-    // uint16_t data_offset = (tcp_copy.data_offset_and_flags & 0xF000) >> 12;
-    // // TCP header
-    // uint16_t tcp_header_length = data_offset * 4;
-    // uint16_t tcp_total_length = sizeof(tcp_packet); // Calculate the total length of the TCP segment
-    uint32_t tcp_copy_sum = calculate_checksum(pseudo_header, sizeof(pseudo_header));
-    if(tcp_copy.options_and_data == nullptr){
-        tcp_copy_sum += calculate_checksum(&tcp_copy, sizeof(tcp_copy)- sizeof(tcp_copy.options_and_data) - 4);
+    uint32_t tcp_copy_sum = calculate_checksum(pseudo_header, sizeof(pseudo_header),0);
+
+    tcp_copy_sum += calculate_checksum(&tcp_copy, sizeof(tcp_copy)- sizeof(tcp_copy.options_and_data) - 4, 0);
+
+    if(tcp_copy.options_and_data != nullptr){
+        tcp_copy_sum += calculate_checksum(tcp_copy.options_and_data, tcp_length - 20, 1);
     }
-    else{
-        tcp_copy_sum += calculate_checksum(&tcp_copy, sizeof(tcp_copy));
-    }
+
+
      std::cout << "checkpoint4" << '\n';
     //If ip_copy_sum ends up being greater than 16 bits after adding two calll to calculate_checksum twice then we carry the bits over again.
     tcp_copy_sum = (tcp_copy_sum & 0xFFFF) + (tcp_copy_sum >> 16);
@@ -157,12 +159,13 @@ bool Server::valid_checksum(IPv4_Header ip_header, TCP_Packet tcp_packet){
     ip_copy.header_checksum = 0;
 
     uint32_t ip_copy_sum;
+
+    ip_copy_sum = calculate_checksum(&ip_copy,sizeof(ip_copy) - sizeof(ip_copy.options) - 4,0);
+
     if(ip_copy.options != nullptr){
-        ip_copy_sum = calculate_checksum(&ip_copy,sizeof(ip_copy));
+        ip_copy_sum += calculate_checksum(ip_copy.options,ip_total_length - 20 - tcp_length,1);
     }
-    else{
-        ip_copy_sum = calculate_checksum(&ip_copy,sizeof(ip_copy) - sizeof(ip_copy.options) - 4);
-    }
+
 
     ip_copy_sum = (ip_copy_sum & 0xFFFF) + (ip_copy_sum >> 16);
 
@@ -190,21 +193,24 @@ bool Server::valid_checksum(IPv4_Header ip_header, TCP_Packet tcp_packet){
     }
 }
 
-uint32_t Server::calculate_checksum(const void* data, size_t length) {
+uint32_t Server::calculate_checksum(const void* data, size_t length, int option) {
     const uint16_t* buffer = reinterpret_cast<const uint16_t*>(data);
     uint32_t sum = 0;
 
     for (size_t i = 0; i < length / 2; ++i) {
-        std::cout<<"val: " << (buffer[i]) << "\niteration : " << i << '\n';
-        sum += (buffer[i]);
+        std::cout << "val: " << (!option ? buffer[i] : ntohs(buffer[i])) << "\niteration : " << i << '\n';
+        sum += !option ? (buffer[i]) : ntohs(buffer[i]);
         std::cout<<"sum: " << sum <<" iteration: " << i << '\n';
     }
 
     // If the length is odd, add the last byte
     if (length % 2 != 0) {
-        sum += static_cast<uint16_t>(reinterpret_cast<const uint8_t*>(data)[length - 1]);
-        std::cout<<"sum odd byte: " << sum <<" iteration: " << '\n';
+        uint16_t odd_byte = static_cast<uint16_t>(reinterpret_cast<const uint8_t*>(data)[length - 1]);
+        std::cout<< "val odd byte " << (odd_byte << 8) << '\n';
+        sum += (odd_byte << 8);  // Pad the odd byte on the right side
+        std::cout << "sum odd byte: " << sum << " iteration: " << '\n';
     }
+
 
     return sum;
 }
@@ -432,106 +438,106 @@ bool Server::check_excluded_ip_address(uint32_t source_ip,uint32_t dest_ip,uint1
     return false;
 }
 
-// void Server::run_server(const char* wan_ip);{
+void Server::run_server(const char* wan_ip){
 
-//     pthread_t threads[MAX_CONNECTIONS];
-
-
-//     int wan_fd;
-//     int new_client_socket;
-
-//     //Initialize array of sockets to be 0s
-//     client_sockets[MAX_CONNECTIONS];
-//     memset(client_sockets, 0, sizeof(client_socket));
-
-//     struct sockaddr_in server_addr;
-//     struct sockaddr_in client_addr;
-//     socklen_t client_addr_size = sizeof(client_addr);
-//     char buffer[BUFFER_SIZE];
-
-//     if((wan_fd = socket(PF_INET, SOCK_STREAM, 0)) == -1){
-//         perror("socket");
-//         exit(1);
-//     }
-//     server_addr.sin_family = AF_INET;
-//     server_addr.sin_port = htons(DEFAULT_PORT);
-//     server_addr.sin_addr.s_addr = inet_addr(wan_ip);
-
-//     memset(server_addr.sin_zero, '\0',sizeof(server_addr.sin_zero));
-
-//     /*Binding the socket*/
-//     printf("Binding socket to %d\n",port_number);
-
-//     if(bind(wan_fd, (struct sockaddr*) &server_addr, 
-//         sizeof(server_addr)) == -1){
-//             perror("Error in binding the socket");
-//             exit(1);
-//         }
-
-//     /*Fixes error when port number is in use.*/
-//     int yes=1;
-
-//     if(setsockopt(wan_fd,SOL_SOCKET,SO_REUSEADDR,&yes,sizeof yes) == -1){
-//         perror("Cannot reset socket options on wan_fd");
-//         exit(1);
-//     }
-
-//     if(listen(wan_fd, BACKLOG) == -1){
-//         perror("Error in listening to socket");
-//         exit(1);
-//         }
-
-//      printf("Listening to socket %d\n",port_number);
-
-//      printf("Waiting to accept connection from client.\n");
-
-//     while(1){
-
-//         //Accepting client connections to server 
-//         new_client_socket = accept(wan_fd, (struct sockaddr *) &client_addr,&client_addr_size); 
-//         if(client_fd == -1){
-//             perror("Error in accepting client connection");
-//             exit(1);
-//         }
-//         for (int i = 0; i < MAXCLIENTS; i++) {
-//                 if (client_sockets[i] == 0) {
-//                     client_sockets[i] = new_client_socket;
-//                     break;
-//                 }
-//         }
-//         //getting client_ip address and port number and printing it to console.
-//         char client_ip[INET_ADDRSTRLEN];
-//         inet_ntop(AF_INET, &client_addr.sin_addr, client_ip,sizeof(client_ip));
-//         int client_port = ntohs(client_addr.sin_port);
-//         printf("Accepted connection from client:\n %s:%d\n", client_ip, client_port);
+    pthread_t threads[MAX_CONNECTIONS];
 
 
-//         //Now to read HTTP request from client
+    int wan_fd;
+    int new_client_socket;
 
-//         memset(buffer, 0, BUFFER_SIZE);
-//         recv(client_fd, buffer, BUFFER_SIZE, 0);
-//         printf("Request Received:\n%s\n",buffer);
-//     }
-// }
+    //Initialize array of sockets to be 0s
+    int client_sockets[MAX_CONNECTIONS];
+    memset(client_sockets, 0, sizeof(client_sockets));
 
-// void client_sock_thread(void* client_sock){
-//     int client_socket = *((int*)client_sock);
-//     char buffer[BUFFER_SIZE];
-//     int valread;
+    struct sockaddr_in server_addr;
+    struct sockaddr_in client_addr;
+    socklen_t client_addr_size = sizeof(client_addr);
+    char buffer[BUFFER_SIZE];
 
-//     while(1){
-//         // Receive data from client if there is data
-//         valread = read(client_sock, buffer, BUFFER_SIZE);
-//         buffer[valread] = '\0';
+    if((wan_fd = socket(PF_INET, SOCK_STREAM, 0)) == -1){
+        perror("socket");
+        exit(1);
+    }
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(DEFAULT_PORT);
+    server_addr.sin_addr.s_addr = inet_addr(wan_ip);
 
-//         if (valread == 0) {
-//             close(client_sock);
-//             // Update client_sockets array within a critical section if needed
-//             // ...
-//         } else {
-//             printf("Client %d: %s\n", client_sock, buffer);
-//             send(client_sock, buffer, strlen(buffer), 0);
-//         }
-//     }
-//         return NULL;
-// }
+    memset(server_addr.sin_zero, '\0',sizeof(server_addr.sin_zero));
+
+    /*Binding the socket*/
+    printf("Binding socket to %d\n",port_number);
+
+    if(bind(wan_fd, (struct sockaddr*) &server_addr, 
+        sizeof(server_addr)) == -1){
+            perror("Error in binding the socket");
+            exit(1);
+        }
+
+    /*Fixes error when port number is in use.*/
+    int yes=1;
+
+    if(setsockopt(wan_fd,SOL_SOCKET,SO_REUSEADDR,&yes,sizeof yes) == -1){
+        perror("Cannot reset socket options on wan_fd");
+        exit(1);
+    }
+
+    if(listen(wan_fd, BACKLOG) == -1){
+        perror("Error in listening to socket");
+        exit(1);
+        }
+
+     printf("Listening to socket %d\n",port_number);
+
+     printf("Waiting to accept connection from client.\n");
+
+    while(1){
+
+        //Accepting client connections to server 
+        new_client_socket = accept(wan_fd, (struct sockaddr *) &client_addr,&client_addr_size); 
+        if(client_fd == -1){
+            perror("Error in accepting client connection");
+            exit(1);
+        }
+        for (int i = 0; i < MAXCLIENTS; i++) {
+                if (client_sockets[i] == 0) {
+                    client_sockets[i] = new_client_socket;
+                    break;
+                }
+        }
+        //getting client_ip address and port number and printing it to console.
+        char client_ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &client_addr.sin_addr, client_ip,sizeof(client_ip));
+        int client_port = ntohs(client_addr.sin_port);
+        printf("Accepted connection from client:\n %s:%d\n", client_ip, client_port);
+
+
+        //Now to read HTTP request from client
+
+        memset(buffer, 0, BUFFER_SIZE);
+        recv(client_fd, buffer, BUFFER_SIZE, 0);
+        printf("Request Received:\n%s\n",buffer);
+    }
+}
+
+void client_sock_thread(void* client_sock){
+    int client_socket = *((int*)client_sock);
+    char buffer[BUFFER_SIZE];
+    int valread;
+
+    while(1){
+        // Receive data from client if there is data
+        valread = read(client_sock, buffer, BUFFER_SIZE);
+        buffer[valread] = '\0';
+
+        if (valread == 0) {
+            close(client_sock);
+            // Update client_sockets array within a critical section if needed
+            // ...
+        } else {
+            printf("Client %d: %s\n", client_sock, buffer);
+            send(client_sock, buffer, strlen(buffer), 0);
+        }
+    }
+        return NULL;
+}

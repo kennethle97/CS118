@@ -48,7 +48,7 @@ class Server {
     IPv4_Header parse_IPv4_Header(const char* packet);
     TCP_Packet parse_TCP_Packet(IPv4_Header ip_header, const char* packet);
     bool valid_checksum(IPv4_Header ip_header, TCP_Packet tcp_packet);
-    uint32_t calculate_checksum(const void* data, size_t length);
+    uint32_t calculate_checksum(const void* data, size_t length,int option);
     void printIPv4Header(const IPv4_Header& header);
     void printTCPHeader(const TCP_Packet& tcp_packet);
     // void map_ip_port(std::string ip_address,port_pair pair_port );
